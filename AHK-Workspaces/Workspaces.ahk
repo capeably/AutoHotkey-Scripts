@@ -1,7 +1,7 @@
 #SingleInstance,Force
 global CurrentWsNode, CurrentWinNode, LastWsRow, LastWinRow, HotkeyTargetNode, HotkeyHwndCtrl
 global settings:=new xml("settings")
-global Version:="0.004.0"
+global Version:="2.0"
 if(FileExist("workspaces.ico"))
 	Menu,Tray,Icon,Workspaces.ico
 Gui()
@@ -31,6 +31,8 @@ Gui(){
 	Hotkey,^up,moveup,On
 	Hotkey,~Enter,Enter,On
 	Hotkey,~NumpadEnter,Enter,On
+	Hotkey,Tab,TabForward,On
+	Hotkey,+Tab,TabBackward,On
 	Hotkey,+Escape,keyExit,On
 	Gui,Font,s9,Segoe UI
 	; Left pane - search + workspace list
@@ -77,6 +79,8 @@ BuildSettingsMenu(){
 	}
 	Menu,SettingsMenu,Add
 	Menu,SettingsMenu,Add,Edit Hotkeys...,EditSettingsHotkeys
+	Menu,SettingsMenu,Add
+	Menu,SettingsMenu,Add,About...,AboutWorkspaces
 	Menu,MainMenuBar,Add,Settings,:SettingsMenu
 	Gui,1:Menu,MainMenuBar
 }
@@ -140,6 +144,26 @@ SettingLvEvent:
 		if node
 			EditHotkey(node)
 	}
+return
+AboutWorkspaces:
+	Gui,5:Destroy
+	Gui,5:Font,s12 Bold,Segoe UI
+	Gui,5:Add,Text,,Workspaces v%Version%
+	Gui,5:Font,s9 Norm,Segoe UI
+	Gui,5:Add,Text,y+10,Originally created by maestrith.
+	Gui,5:Add,Text,,Updated to v2.0 (workspace launcher and 3-pane GUI)`nby capeably with the help of a friend named Claude.
+	Gui,5:Font,s9 Underline cBlue,Segoe UI
+	Gui,5:Add,Text,y+15 gAboutOpenRepo,github.com/capeably/AutoHotkey-Scripts
+	Gui,5:Font,s9 Norm c000000,Segoe UI
+	Gui,5:Add,Button,y+15 w80 g5GuiClose Default,OK
+	Gui,5:Show,,About Workspaces
+return
+AboutOpenRepo:
+	Run,https://github.com/capeably/AutoHotkey-Scripts/tree/master/AHK-Workspaces
+return
+5GuiEscape:
+5GuiClose:
+	Gui,5:Destroy
 return
 ; ========== Left Pane Event Handlers ==========
 WsListEvent:
@@ -691,6 +715,38 @@ Move_Windows(){
 	if((prev:=CurrentWinNode.previoussibling).xml="")
 		return
 	WorkSpaceState(),root:=CurrentWinNode.ParentNode,root.InsertBefore(CurrentWinNode,prev),PopulateGroups(1)
+	return
+}
+TabNav(){
+	TabForward:
+	Gui,1:Default
+	focusHwnd:=DllCall("GetFocus","Ptr")
+	if(focusHwnd=hwnd("wslv")){
+		ControlFocus,,% "ahk_id " hwnd("winlv")
+		return
+	}
+	if(focusHwnd=hwnd("winlv")){
+		ControlFocus,,% "ahk_id " hwnd("wintv")
+		return
+	}
+	Hotkey,Tab,Off
+	Send,{Tab}
+	Hotkey,Tab,On
+	return
+	TabBackward:
+	Gui,1:Default
+	focusHwnd:=DllCall("GetFocus","Ptr")
+	if(focusHwnd=hwnd("wintv")){
+		ControlFocus,,% "ahk_id " hwnd("winlv")
+		return
+	}
+	if(focusHwnd=hwnd("winlv")){
+		ControlFocus,,% "ahk_id " hwnd("wslv")
+		return
+	}
+	Hotkey,+Tab,Off
+	Send,+{Tab}
+	Hotkey,+Tab,On
 	return
 }
 ; ========== Populate Functions ==========
