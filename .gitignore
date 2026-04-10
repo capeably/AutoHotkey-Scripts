@@ -3,6 +3,14 @@ settings.xml
 
 # Backup files
 *.bak
+CustomBackup.bat
+QuickBackup.bat
 
 # Library folder
 lib/
+
+# Archive folders
+_Archive/
+
+# Claude settings
+.claude/
