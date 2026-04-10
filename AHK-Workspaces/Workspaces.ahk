@@ -2,8 +2,9 @@
 global CurrentWsNode, CurrentWinNode, LastWsRow, LastWinRow, HotkeyTargetNode, HotkeyHwndCtrl
 global settings:=new xml("settings")
 global Version:="2.0"
-if(FileExist("workspaces.ico"))
-	Menu,Tray,Icon,Workspaces.ico
+IconPath := A_ScriptDir "\assets\workspaces.ico"
+if(FileExist(IconPath))
+	Menu,Tray,Icon,%IconPath%
 Gui()
 return
 show:
@@ -325,9 +326,9 @@ ActivateWindow(row){
 	prev:=SetWinMatchMode(node),wintitle:=BuildWinTitle(node,ea)
 	if !WinExist(wintitle){
 		run:=XPathNode(node,"item[@title='Run']/@value").text
-		if RegExMatch(run,"i)^(.*?\.exe)\s",exeMatch){
+		if RegExMatch(run,"i)^(.*?\.exe)\s+(.*)",exeMatch){
 			SplitPath,exeMatch1,,dir
-			Run,%run%,%dir%
+			Run,"%exeMatch1%" %exeMatch2%,%dir%
 		}else{
 			SplitPath,run,file,dir
 			if !file
@@ -1205,9 +1206,9 @@ Restore(windows,minimized,skipwait:=0){
 					Continue
 				}
 				file:=getvalue(ww,"Run")
-				if RegExMatch(file,"i)^(.*?\.exe)\s",exeMatch){
+				if RegExMatch(file,"i)^(.*?\.exe)\s+(.*)",exeMatch){
 					SplitPath,exeMatch1,,dir
-					Run,%file%,%dir%
+					Run,"%exeMatch1%" %exeMatch2%,%dir%
 				}else{
 					SplitPath,file,filename,dir
 					if !filename
