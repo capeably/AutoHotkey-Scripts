@@ -21,7 +21,7 @@ GuiClose:
 	}
 return
 Gui(){
-	static wslv, winlv, wintv, wssearch
+	static wslv, winlv, wintv, wssearch, wsclear
 	SetTitleMatchMode,2
 	Gui,+hwndhwnd
 	hwnd(1,hwnd)
@@ -35,19 +35,22 @@ Gui(){
 	Hotkey,Tab,TabForward,On
 	Hotkey,+Tab,TabBackward,On
 	Hotkey,+Escape,keyExit,On
+	Hotkey,Escape,ClearWsSearch,On
 	Gui,Font,s9,Segoe UI
 	; Left pane - search + workspace list
-	Gui,Add,Edit,x10 y10 w250 vWsSearch gWsSearchUpdate hwndwssearch
+	Gui,Add,Edit,x10 y10 w228 h23 vWsSearch gWsSearchUpdate hwndwssearch
 	Gui,Add,ListView,x10 y+5 w250 h370 AltSubmit gWsListEvent hwndwslv +Grid,Workspace|Hotkey
 	Gui,Add,Button,x10 y+5 w250 gcreateworkspace,&Create Workspace
 	; Middle pane - window list
 	Gui,Add,ListView,x270 y10 w250 h398 AltSubmit gWinListEvent hwndwinlv,Window
 	Gui,Add,Button,x270 y+5 gcapture,&Add Windows
-	Gui,Add,Button,x+5 gupdatepos,&Update Positions
+	Gui,Add,Button,x+5 gArrangeWindows,Arrange &Windows
 	; Right pane - window settings tree + buttons
 	Gui,Add,TreeView,x530 y10 w350 h398 AltSubmit gWinTvEvent hwndwintv
 	Gui,Add,Button,x530 y+5 ghelp,&Help
-	hwnd("wslv",wslv),hwnd("winlv",winlv),hwnd("wintv",wintv),hwnd("wssearch",wssearch)
+	; Clear-search "X": a small grey glyph just right of the search box, hidden until text is typed (click or Esc clears)
+	Gui,Add,Text,x240 y10 w18 h23 +0x200 +Center cGray gClearWsSearch hwndwsclear Hidden,% Chr(0x2715)
+	hwnd("wslv",wslv),hwnd("winlv",winlv),hwnd("wintv",wintv),hwnd("wssearch",wssearch),hwnd("wsclear",wsclear)
 	DllCall("SendMessage","Ptr",wssearch,"UInt",0x1501,"Int",1,"WStr","Search workspaces...")
 	StyleListViewHeaders()
 	Gui,Show,w890,Workspaces %Version%
@@ -64,7 +67,7 @@ BuildSettingsMenu(){
 	top:=settings.ssn("//Settings")
 	if !top
 		top:=settings.Add({path:"Settings",att:{name:"Settings"}})
-	for a,b in ["Hide/Show GUI","Toggle Current Workspace","Workspace Launcher"]
+	for a,b in ["Hide/Show GUI","Toggle Current Workspace","Workspace Launcher","Arrange Windows"]
 		if !XPathNode(top,"setting[@name='" b "']"){
 			newset:=settings.under({under:top,node:"setting",att:{name:b}})
 			if(b="Workspace Launcher")
@@ -110,6 +113,8 @@ MenuSettingAction:
 		Restore(XPathNodes(current,"descendant::window"),1,1)
 	}else if(ea.name="Workspace Launcher"){
 		ShowLauncher()
+	}else if(ea.name="Arrange Windows"){
+		ArrangeWindows()
 	}
 return
 EditSettingsHotkeys:
@@ -218,8 +223,24 @@ WsDoubleClick(row){
 	}
 }
 WsSearchUpdate:
+	UpdateWsClearBtn()
 	FilterWorkspaceList()
 return
+ClearWsSearch:
+	Gui,1:Default
+	GuiControlGet,t,,% hwnd("wssearch")
+	if(t="")
+		return
+	GuiControl,,% hwnd("wssearch")
+	GuiControl,Hide,% hwnd("wsclear")
+	GuiControl,Focus,% hwnd("wssearch")
+	FilterWorkspaceList()
+return
+UpdateWsClearBtn(){
+	Gui,1:Default
+	GuiControlGet,t,,% hwnd("wssearch")
+	GuiControl,% (t!="" ? "Show" : "Hide"),% hwnd("wsclear")
+}
 FilterWorkspaceList(){
 	global CurrentWsNode, CurrentWinNode, LastWsRow
 	Gui,1:Default
@@ -459,7 +480,7 @@ capture(){
 		if !XPathNode(node,"window[@title='" title "']"){
 			WinGet,exe,ProcessName,%aid%
 			top:=settings.under({under:node,node:"window",att:{title:title}})
-			for a,b in {"Window Match Mode":"contains",Class:class,Exe:exe,Run:Run,"Auto Close":0,"Auto Open":0,Maximize:0}
+			for a,b in {"Window Title":title,"Window Match Mode":"contains",Class:class,"Class Match Mode":"exact",Exe:exe,Run:Run,"Auto Close":0,"Auto Open":0,Maximize:0}
 				settings.under({under:top,node:"item",att:{title:a,value:b}})
 			mc:=settings.under({under:top,node:"monitor",att:{title:"Monitor Count",value:count}})
 			settings.under({under:mc,node:"position",att:{title:"Position",value:position}})
@@ -591,6 +612,10 @@ enter(){
 		ea:=xml.ea(current)
 		if(ea.title~="(Auto Close|Auto Open|Maximize)"){
 			current.SetAttribute("value",ea.value?0:1)
+		}else if(ea.title="Window Title"){
+			InputBox,newval,Edit Window Title,Enter the window title to match (leave blank to match by class/exe only),,,,,,,,% ea.value
+			if !ErrorLevel
+				current.SetAttribute("value",newval)
 		}else if(ea.title="Window Match Mode"){
 			modes:=["contains","exact","startswith","endswith","regex"]
 			cur:=ea.value?ea.value:"contains"
@@ -600,10 +625,23 @@ enter(){
 					break
 				}
 			current.SetAttribute("value",modes[next])
+		}else if(ea.title="Class Match Mode"){
+			modes:=["exact","contains","startswith","endswith","regex"]
+			cur:=ea.value?ea.value:"exact"
+			Loop,% modes.Length()
+				if(modes[A_Index]=cur){
+					next:=A_Index<modes.Length()?A_Index+1:1
+					break
+				}
+			current.SetAttribute("value",modes[next])
 		}else if(ea.title="Exe"){
-			InputBox,newexe,Edit Exe,Enter the process name (e.g. chrome.exe),,,,,,,,% ea.value
-			if(!ErrorLevel&&newexe!="")
+			InputBox,newexe,Edit Exe,Enter the process name (e.g. chrome.exe; leave blank to ignore),,,,,,,,% ea.value
+			if !ErrorLevel
 				current.SetAttribute("value",newexe)
+		}else if(ea.title="Class"){
+    InputBox,newclass,Edit Class,Enter the window class (e.g. CabinetWClass; leave blank to ignore),,,,,,,,% ea.value
+    if !ErrorLevel
+        current.SetAttribute("value",newclass)
 		}else if(ea.title="run"){
 			file:=ea.value
 			SplitPath,file,,dir
@@ -1042,14 +1080,17 @@ ShowTooltip(x*){
 }
 BackfillWindowItems(){
 	; Desired item order (monitor nodes stay at the end automatically)
-	order:=["Window Match Mode","Class","Exe","Run","Auto Close","Auto Open","Maximize"]
-	defaults:={"Exe":"","Window Match Mode":"contains"}
+	order:=["Window Title","Window Match Mode","Class","Class Match Mode","Exe","Run","Auto Close","Auto Open","Maximize"]
+	defaults:={"Exe":"","Window Match Mode":"contains","Class Match Mode":"exact"}
 	windows:=settings.sn("//window")
 	while,ww:=windows.item[A_Index-1]{
 		try {
 			; Rename legacy "Match Mode" to "Window Match Mode"
 			if(old:=XPathNode(ww,"item[@title='Match Mode']"))
 				old.SetAttribute("title","Window Match Mode")
+			; Backfill Window Title from the window's title attribute (preserves legacy match behavior)
+			if !XPathNode(ww,"item[@title='Window Title']")
+				settings.under({under:ww,node:"item",att:{title:"Window Title",value:XPathNode(ww,"@title").text}})
 			; Backfill missing items
 			for itemName,itemDefault in defaults{
 				if !XPathNode(ww,"item[@title='" itemName "']")
@@ -1105,17 +1146,18 @@ SetWinMatchMode(ww){
 BuildWinTitle(ww,ea:=""){
 	if !IsObject(ea)
 		ea:=xml.ea(ww)
-	title:=ea.title
+	title:=getvalue(ww,"Window Title")
 	mode:=getvalue(ww,"Window Match Mode")
-	if(mode="endswith")
+	if(title!="" && mode="endswith")
 		title:=title "$"
 	wintitle:=title
 	class:=getvalue(ww,"Class")
-	if(class)
-		wintitle.=" ahk_class " class
+	classMode:=getvalue(ww,"Class Match Mode")
+	if(class && (classMode="" || classMode="exact"))
+		wintitle.=(wintitle!="" ? " " : "") "ahk_class " class
 	exe:=getvalue(ww,"Exe")
 	if(exe)
-		wintitle.=" ahk_exe " exe
+		wintitle.=(wintitle!="" ? " " : "") "ahk_exe " exe
 	return wintitle
 }
 WinMatch(title,pattern,mode){
@@ -1130,6 +1172,51 @@ WinMatch(title,pattern,mode){
 	else if(mode="regex")
 		return RegExMatch(title,pattern)
 	return InStr(title,pattern)
+}
+; Returns an array of HWNDs for windows matching this ww's title/class/exe per their modes.
+; Server-side narrows by ahk_exe (always when set) and ahk_class (only when class mode is exact);
+; fuzzy class/title modes are applied via WinMatch in the loop.
+ResolveWindowIds(ww){
+	exe:=getvalue(ww,"Exe")
+	classPat:=getvalue(ww,"Class")
+	classMode:=getvalue(ww,"Class Match Mode")
+	titlePat:=getvalue(ww,"Window Title")
+	titleMode:=getvalue(ww,"Window Match Mode")
+	fuzzyClass:=(classMode!="" && classMode!="exact")
+	filter:=""
+	if(exe)
+		filter.=" ahk_exe " exe
+	if(classPat && !fuzzyClass)
+		filter.=" ahk_class " classPat
+	WinGet,list,list,% LTrim(filter)
+	out:=[]
+	Loop,%list%{
+		h:=list%A_Index%
+		if(classPat && fuzzyClass){
+			WinGetClass,c,ahk_id %h%
+			if !WinMatch(c,classPat,classMode)
+				continue
+		}
+		if(titlePat!=""){
+			WinGetTitle,t,ahk_id %h%
+			if !WinMatch(t,titlePat,titleMode)
+				continue
+		}
+		out.Push(h)
+	}
+	return out
+}
+; Returns a usable WinTitle for WinGetPos/WinExist/WinActivate:
+; - Fuzzy class: returns "ahk_id <hwnd>" of the first matching live window (or "" if none).
+; - Exact class: returns BuildWinTitle(ww). Caller should wrap in SetWinMatchMode/RestoreWinMatchMode.
+ResolveWinTarget(ww){
+	classMode:=getvalue(ww,"Class Match Mode")
+	fuzzyClass:=(classMode!="" && classMode!="exact")
+	if(fuzzyClass){
+		ids:=ResolveWindowIds(ww)
+		return ids.Length() ? "ahk_id " ids[1] : ""
+	}
+	return BuildWinTitle(ww)
 }
 RestoreWinMatchMode(prev){
 	SetTitleMatchMode,%prev%
@@ -1169,16 +1256,32 @@ Hotkey(){
 		}else if(ea.name="Workspace Launcher"){
 			ShowLauncher()
 			return
+		}else if(ea.name="Arrange Windows"){
+			ArrangeWindows()
+			return
 		}
 	}
 	windows:=settings.sn("//*[@hotkey='" A_ThisHotkey "']/descendant::window"),minimized:=""
 	SysGet,count,MonitorCount
 	while,ww:=windows.item[A_Index-1],ea:=xml.ea(ww){
-		prev:=SetWinMatchMode(ww),wintitle:=BuildWinTitle(ww,ea)
-		if(WinActive(wintitle)){
+		prev:=SetWinMatchMode(ww)
+		classMode:=getvalue(ww,"Class Match Mode"),fuzzyClass:=(classMode!="" && classMode!="exact")
+		target:=""
+		if(fuzzyClass){
+			for _,h in ResolveWindowIds(ww)
+				if(WinActive("ahk_id " h)){
+					target:="ahk_id " h
+					break
+				}
+		}else{
+			wintitle:=BuildWinTitle(ww,ea)
+			if(WinActive(wintitle))
+				target:=wintitle
+		}
+		if(target!=""){
 			RestoreWinMatchMode(prev)
 			position:=(XPathNode(ww,"*[@title='Monitor Count'][@value='" count "']/position/@value").text),position:=position?position:XPathNode(ww,"descendant::position/@value").text
-			WinGetPos,x,y,w,h,% wintitle
+			WinGetPos,x,y,w,h,% target
 			for a,b in {x:x,y:y,w:w,h:h}{
 				RegExMatch(position,"Oi)" a "(-?\d+)",found)
 				if(found.1!=b){
@@ -1199,8 +1302,14 @@ Hotkey(){
 Restore(windows,minimized,skipwait:=0){
 	while,ww:=windows.item[windows.length-(A_Index)],ea:=xml.ea(ww){
 		prev:=SetWinMatchMode(ww),wintitle:=BuildWinTitle(ww,ea)
+		classMode:=getvalue(ww,"Class Match Mode"),fuzzyClass:=(classMode!="" && classMode!="exact")
+		target:=wintitle
+		if(fuzzyClass){
+			ids:=ResolveWindowIds(ww)
+			target:=ids.Length() ? "ahk_id " ids[1] : ""
+		}
 		if(minimized){
-			if (WinExist(wintitle)=0){
+			if((fuzzyClass && target="") || (!fuzzyClass && WinExist(wintitle)=0)){
 				if !getvalue(ww,"Auto Open"){
 					RestoreWinMatchMode(prev)
 					Continue
@@ -1216,29 +1325,40 @@ Restore(windows,minimized,skipwait:=0){
 					else
 						Run,%filename%,%dir%
 				}
-				WinWait,% wintitle,,1
+				if(fuzzyClass){
+					Loop,10{
+						Sleep,100
+						ids:=ResolveWindowIds(ww)
+						if(ids.Length()){
+							target:="ahk_id " ids[1]
+							break
+						}
+					}
+				}else
+					WinWait,% wintitle,,1
 			}
-			WinActivate,% wintitle
+			if(target=""){
+				RestoreWinMatchMode(prev)
+				Continue
+			}
+			WinActivate,% target
 			pos:=[]
 			SysGet,count,MonitorCount
 			position:=(XPathNode(ww,"*[@title='Monitor Count'][@value='" count "']/position/@value").text),position:=position?position:XPathNode(ww,"descendant::position/@value").text
 			for a,b in StrSplit(position," ")
 				pos[SubStr(b,1,1)]:=SubStr(b,2)
 			if(getvalue(ww,"Maximize")){
-				WinWaitActive,% wintitle
-				WinMaximize,% wintitle
+				WinWaitActive,% target
+				WinMaximize,% target
 			}else
-				WinMove,% wintitle,,% pos.x,% pos.y,% pos.w,% pos.h
+				WinMove,% target,,% pos.x,% pos.y,% pos.w,% pos.h
 		}else{
-			WinGet,list,list,% "ahk_class" XPathNode(ww,"*[@title='Class']/@value").text
 			match:=[]
-			Loop,%list%
-			{
-				WinGetTitle,title,% "ahk_id" list%A_Index%
-				if WinMatch(title,ea.title,getvalue(ww,"Window Match Mode"))
-					match[title]:=list%A_Index%
+			for _,h in ResolveWindowIds(ww){
+				WinGetTitle,t,ahk_id %h%
+				match[t]:=h
 			}
-			for a,b in match{
+			for _,b in match{
 				if(getvalue(ww,"Auto Close"))
 					WinClose,ahk_id %b%
 				else
@@ -1248,24 +1368,67 @@ Restore(windows,minimized,skipwait:=0){
 		RestoreWinMatchMode(prev)
 	}ShowTooltip()
 }
-Update_Positions(){
-	updatepos:
-	global CurrentWsNode
-	if !IsObject(CurrentWsNode)
-		return ShowMessage("Please select a workspace first")
-	wl:=XPathNodes(CurrentWsNode,"descendant::window")
-	while,ww:=wl.item[A_Index-1]{
-		win:=XPathNode(ww,"@title").text
-		WinGet,max,MinMax,%win%
-		if (max=0)
-			updatepos(ww)
-	}PopulateGroups(1)
-	return
+; Snap every already-open window across ALL workspaces to its saved position for the
+; current monitor count. Never launches anything: windows that aren't running are skipped.
+; Useful after re-docking (e.g. laptop -> 3 monitors) when everything piles onto one screen.
+ArrangeWindows(){
+	SysGet,count,MonitorCount
+	moved:=0,nopos:=0,notrunning:=0,seen:={}
+	windows:=settings.sn("//workspaces/workspace/descendant::window")
+	while,ww:=windows.item[A_Index-1]{
+		; Only use a layout saved for THIS monitor count - applying another layout's
+		; coordinates would throw windows off-screen, so skip rather than guess.
+		position:=XPathNode(ww,"*[@title='Monitor Count'][@value='" count "']/position/@value").text
+		pos:=[]
+		for a,b in StrSplit(position," ")
+			pos[SubStr(b,1,1)]:=SubStr(b,2)
+		if(pos.x=""||pos.y=""||pos.w=""||pos.h=""){
+			nopos++
+			continue
+		}
+		prev:=SetWinMatchMode(ww)
+		ids:=ResolveWindowIds(ww)
+		RestoreWinMatchMode(prev)
+		if !ids.Length(){
+			notrunning++
+			continue
+		}
+		maximize:=getvalue(ww,"Maximize")
+		for _,h in ids{
+			if seen[h]
+				continue
+			seen[h]:=1
+			; Maximized/minimized windows ignore WinMove, so normalize first.
+			WinGet,state,MinMax,ahk_id %h%
+			if(state!=0){
+				WinRestore,ahk_id %h%
+				Sleep,60
+			}
+			WinMove,ahk_id %h%,,% pos.x,% pos.y,% pos.w,% pos.h
+			if(maximize)
+				WinMaximize,ahk_id %h%
+			moved++
+		}
+	}
+	msg:="Arranged " moved " window" (moved=1?"":"s") " for " count " monitor" (count=1?"":"s")
+	if(notrunning)
+		msg.="`n" notrunning " not running (skipped)"
+	if(nopos)
+		msg.="`n" nopos " with no layout saved for " count " monitor" (count=1?"":"s")
+	ShowTooltip(msg)
+	SetTimer,ClearArrangeTip,-3000
 }
+ClearArrangeTip:
+	ToolTip
+return
 updatepos(current){
 	SysGet,count,MonitorCount
 	parent:=XPathNode(current,"ancestor-or-self::window")
-	WinGetPos,x,y,w,h,% XPathNode(parent,"@title").text
+	prev:=SetWinMatchMode(parent)
+	target:=ResolveWinTarget(parent)
+	if(target!="")
+		WinGetPos,x,y,w,h,% target
+	RestoreWinMatchMode(prev)
 	if !position:=XPathNode(parent,"*[@title='Monitor Count'][@value='" count "']")
 		position:=settings.under({under:parent,node:"monitor",att:{title:"Monitor Count",value:count}})
 	if !pos:=XPathNode(position,"position")
@@ -1273,7 +1436,8 @@ updatepos(current){
 	if(x!=""&&y!=""&&w!=""&&h!=""){
 		pos.SetAttribute("value","x" x " y" y " w" w " h" h)
 	}else{
-		InputBox,newinfo,New Position,Enter a new position for this window,,,,,,,,% ea.position
+		existing:=XPathNode(pos,"@value").text
+		InputBox,newinfo,New Position,Could not find a live window matching this entry. Enter a position manually:,,,,,,,,% existing
 		if(ErrorLevel||newinfo="")
 			return ShowMessage("Please enter a value for this window")
 		pos.SetAttribute("value",newinfo)
